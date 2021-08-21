@@ -1207,13 +1207,13 @@ func postIsuCondition(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	isu := &Isu{}
-	err = tx.Get(isu, "SELECT id FROM `isu` WHERE `jia_isu_uuid` = ? LIMIT 1", jiaIsuUUID)
+	var isuID  int
+	err = tx.Get(isuID, "SELECT id FROM `isu` WHERE `jia_isu_uuid` = ? LIMIT 1", jiaIsuUUID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	if isu.ID == 0 {
+	if isuID == 0 {
 		return c.String(http.StatusNotFound, "not found: isu")
 	}
 
