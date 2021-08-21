@@ -297,7 +297,7 @@ func getUserIDFromSession(c echo.Context) (string, int, error) {
 	jiaUserID := _jiaUserID.(string)
 
 	var id string
-	err = db.Get(&id, "SELECT id FROM `user` WHERE `jia_user_id` = ? LIMIT 1",
+	err = db.Get(&id, "SELECT jia_user_id FROM `user` WHERE `jia_user_id` = ? LIMIT 1",
 		jiaUserID)
 	if err != nil {
 		return "", http.StatusInternalServerError, fmt.Errorf("db error: %v", err)
