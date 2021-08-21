@@ -24,6 +24,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
+	"github.com/newrelic/go-agent/v3/integrations/nrecho-v4"
+	"github.com/newrelic/go-agent/v3/newrelic"
 )
 
 const (
@@ -207,9 +209,21 @@ func init() {
 }
 
 func main() {
+	app, nrerr := newrelic.NewApplication(
+		newrelic.ConfigAppName("ISUCONDITION"),
+		newrelic.ConfigFromEnvironment(),
+		newrelic.ConfigDistributedTracerEnabled(true),
+		newrelic.ConfigDebugLogger(os.Stdout),
+	)
+	if nrerr != nil {
+		os.Exit(1)
+	}
+
 	e := echo.New()
 	e.Debug = true
 	e.Logger.SetLevel(log.DEBUG)
+
+	e.Use(nrecho.Middleware(app))
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
@@ -258,6 +272,7 @@ func main() {
 }
 
 func getSession(r *http.Request) (*sessions.Session, error) {
+	defer newrelic.FromContext(r.Context()).StartSegment("get_session").End()
 	session, err := sessionStore.Get(r, sessionName)
 	if err != nil {
 		return nil, err
@@ -266,6 +281,10 @@ func getSession(r *http.Request) (*sessions.Session, error) {
 }
 
 func getUserIDFromSession(c echo.Context) (string, int, error) {
+	txn := newrelic.FromContext(c.Request().Context())
+	defer txn.End()
+	seg := txn.StartSegment("getUserIDFromSession")
+	defer seg.End()
 	session, err := getSession(c.Request())
 	if err != nil {
 		return "", http.StatusInternalServerError, fmt.Errorf("failed to get session: %v", err)
@@ -278,8 +297,11 @@ func getUserIDFromSession(c echo.Context) (string, int, error) {
 	jiaUserID := _jiaUserID.(string)
 	var count int
 
+	s := createDataStoreSegment("SELECT COUNT(*) FROM `user` WHERE `jia_user_id` = ?", jiaUserID)
+	s.StartTime = txn.StartSegmentNow()
 	err = db.Get(&count, "SELECT COUNT(*) FROM `user` WHERE `jia_user_id` = ?",
 		jiaUserID)
+	s.End()
 	if err != nil {
 		return "", http.StatusInternalServerError, fmt.Errorf("db error: %v", err)
 	}
