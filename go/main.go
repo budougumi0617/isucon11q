@@ -270,6 +270,15 @@ func main() {
 	}
 	db.SetMaxOpenConns(10)
 	defer db.Close()
+	// 再起動対策。つながるまでループ。
+	for {
+		err := db.Ping()
+		if err == nil {
+			break
+		}
+		log.Print(err)
+		time.Sleep(time.Second * 2)
+	}
 
 	postIsuConditionTargetBaseURL = os.Getenv("POST_ISUCONDITION_TARGET_BASE_URL")
 	if postIsuConditionTargetBaseURL == "" {
