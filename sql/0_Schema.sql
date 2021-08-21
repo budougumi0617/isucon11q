@@ -36,6 +36,6 @@ CREATE TABLE `isu_association_config` (
   `url` VARCHAR(255) NOT NULL UNIQUE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4;
 
-CREATE INDEX  id_isu_condition_1 on isu_condition(jia_isu_uuid);
+CREATE INDEX id_isu_condition_1 on isu_condition(jia_isu_uuid);
 
-
+CREATE INDEX id_isu_1 on isu(jia_isu_uuid);
