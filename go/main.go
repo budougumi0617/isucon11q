@@ -52,6 +52,8 @@ var (
 	jiaJWTSigningKey *ecdsa.PublicKey
 
 	postIsuConditionTargetBaseURL string // JIAへのactivate時に登録する，ISUがconditionを送る先のURL
+
+	IsuconClient *http.Client
 )
 
 type Config struct {
@@ -205,6 +207,14 @@ func init() {
 	jiaJWTSigningKey, err = jwt.ParseECPublicKeyFromPEM(key)
 	if err != nil {
 		log.Fatalf("failed to parse ECDSA public key: %v", err)
+	}
+	IsuconClient = http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        500,
+			MaxIdleConnsPerHost: 200,
+			IdleConnTimeout:     120 * time.Second,
+		},
 	}
 }
 
@@ -627,7 +637,7 @@ func postIsu(c echo.Context) error {
 	}
 
 	reqJIA.Header.Set("Content-Type", "application/json")
-	res, err := http.DefaultClient.Do(reqJIA)
+	res, err := IsuconClient.Do(reqJIA)
 	if err != nil {
 		c.Logger().Errorf("failed to request to JIAService: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1231,7 +1241,7 @@ func postIsuCondition(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	var isuID  int
+	var isuID int
 	err = tx.Get(&isuID, "SELECT id FROM `isu` WHERE `jia_isu_uuid` = ? LIMIT 1", jiaIsuUUID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
