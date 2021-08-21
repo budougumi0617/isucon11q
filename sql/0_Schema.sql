@@ -39,3 +39,4 @@ CREATE TABLE `isu_association_config` (
 CREATE INDEX id_isu_condition_1 on isu_condition(jia_isu_uuid);
 
 CREATE INDEX id_isu_1 on isu(jia_isu_uuid);
+CREATE INDEX id_user_1 on user(jia_user_id);
