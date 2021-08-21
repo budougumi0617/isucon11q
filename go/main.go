@@ -766,7 +766,7 @@ func getIsuGraph(c echo.Context) error {
 	defer tx.Rollback()
 
 	var id int
-	err = db.Get(&id, "SELECT id FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ? LIMIT 1",
+	err = tx.Get(&id, "SELECT `id` FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ? LIMIT 1",
 		jiaUserID, jiaIsuUUID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
