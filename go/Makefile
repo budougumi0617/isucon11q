@@ -1,7 +1,7 @@
 reset:
 	sudo truncate --size 0 /var/log/nginx/access.log
 	sudo truncate --size 0 /var/log/mysql/slow.log
-	go build -o ./go/isucondition
+	go build -o ./isucondition
 	sudo systemctl restart isucondition.go.service
 
 alplog:
