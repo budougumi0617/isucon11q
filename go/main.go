@@ -1208,7 +1208,7 @@ func postIsuCondition(c echo.Context) error {
 	defer tx.Rollback()
 
 	var isuID  int
-	err = tx.Get(isuID, "SELECT id FROM `isu` WHERE `jia_isu_uuid` = ? LIMIT 1", jiaIsuUUID)
+	err = tx.Get(&isuID, "SELECT id FROM `isu` WHERE `jia_isu_uuid` = ? LIMIT 1", jiaIsuUUID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
