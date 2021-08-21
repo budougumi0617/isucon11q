@@ -1189,14 +1189,17 @@ func postIsuCondition(c echo.Context) error {
 
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 	if jiaIsuUUID == "" {
+		c.Logger().Errorf("missing: jia_isu_uuid")
 		return c.String(http.StatusBadRequest, "missing: jia_isu_uuid")
 	}
 
 	req := []PostIsuConditionRequest{}
 	err := c.Bind(&req)
 	if err != nil {
+		c.Logger().Errorf("bad request body")
 		return c.String(http.StatusBadRequest, "bad request body")
 	} else if len(req) == 0 {
+		c.Logger().Errorf("bad request body")
 		return c.String(http.StatusBadRequest, "bad request body")
 	}
 
@@ -1214,6 +1217,7 @@ func postIsuCondition(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	if isuID == 0 {
+		c.Logger().Errorf("not found: isu")
 		return c.String(http.StatusNotFound, "not found: isu")
 	}
 
@@ -1222,6 +1226,7 @@ func postIsuCondition(c echo.Context) error {
 		timestamp := time.Unix(cond.Timestamp, 0)
 
 		if !isValidConditionFormat(cond.Condition) {
+			c.Logger().Errorf("bad request body")
 			return c.String(http.StatusBadRequest, "bad request body")
 		}
 		conds = append(conds, &IsuCondition{JIAIsuUUID: jiaIsuUUID, Timestamp: timestamp, IsSitting: cond.IsSitting, Condition: cond.Condition, Message: cond.Message})
