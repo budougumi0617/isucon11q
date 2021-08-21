@@ -6,3 +6,6 @@ reset:
 
 alplog:
 	sudo cat /var/log/nginx/access.log | alp -c /home/isucon/webapp/alp.yml ltsv > ~/alp.log
+
+reset-slowlog:
+	ssh isu11B truncate --size 0 /var/log/mysql/slow.log
