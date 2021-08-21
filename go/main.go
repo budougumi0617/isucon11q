@@ -281,9 +281,7 @@ func getSession(r *http.Request) (*sessions.Session, error) {
 }
 
 func getUserIDFromSession(c echo.Context) (string, int, error) {
-	txn := newrelic.FromContext(c.Request().Context())
-	defer txn.End()
-	seg := txn.StartSegment("getUserIDFromSession")
+	seg := nrecho.FromContext(c).StartSegment("getUserIDFromSession")
 	defer seg.End()
 	session, err := getSession(c.Request())
 	if err != nil {
@@ -298,7 +296,7 @@ func getUserIDFromSession(c echo.Context) (string, int, error) {
 	var count int
 
 	s := createDataStoreSegment("SELECT COUNT(*) FROM `user` WHERE `jia_user_id` = ?", jiaUserID)
-	s.StartTime = txn.StartSegmentNow()
+	s.StartTime = nrecho.FromContext(c).StartSegmentNow()
 	err = db.Get(&count, "SELECT COUNT(*) FROM `user` WHERE `jia_user_id` = ?",
 		jiaUserID)
 	s.End()
