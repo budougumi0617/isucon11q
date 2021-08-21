@@ -208,7 +208,7 @@ func init() {
 	if err != nil {
 		log.Fatalf("failed to parse ECDSA public key: %v", err)
 	}
-	IsuconClient = http.Client{
+	IsuconClient = &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
 			MaxIdleConns:        500,
