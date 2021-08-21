@@ -9,5 +9,7 @@ require (
 	github.com/jmoiron/sqlx v1.3.4
 	github.com/labstack/echo/v4 v4.3.0
 	github.com/labstack/gommon v0.3.0
+	github.com/newrelic/go-agent/v3 v3.14.1
+	github.com/newrelic/go-agent/v3/integrations/nrecho-v4 v1.0.1
 	golang.org/x/crypto v0.0.0-20210513164829-c07d793c2f9a // indirect
 )
