@@ -24,8 +24,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
-	nrecho "github.com/newrelic/go-agent/v3/integrations/nrecho-v4"
-	"github.com/newrelic/go-agent/v3/newrelic"
 )
 
 const (
@@ -209,25 +207,9 @@ func init() {
 }
 
 func main() {
-	// ---------- Newrelic
-	app, nrerr := newrelic.NewApplication(
-		newrelic.ConfigAppName("ISUUMO"),
-		newrelic.ConfigFromEnvironment(),
-		newrelic.ConfigDistributedTracerEnabled(true),
-		newrelic.ConfigDebugLogger(os.Stdout),
-	)
-	if nrerr != nil {
-		os.Exit(1)
-	}
-	// ---------- Newrelic
-
 	e := echo.New()
-	e.Debug = true               // FIXME: 最後オフ！
-	e.Logger.SetLevel(log.DEBUG) // FIXME: 最後消す！
-
-	// ---------- Newrelic
-	e.Use(nrecho.Middleware(app))
-	// ---------- Newrelic
+	e.Debug = true
+	e.Logger.SetLevel(log.DEBUG)
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
@@ -284,8 +266,6 @@ func getSession(r *http.Request) (*sessions.Session, error) {
 }
 
 func getUserIDFromSession(c echo.Context) (string, int, error) {
-	txn := nrecho.FromContext(c)
-	defer txn.End()
 	session, err := getSession(c.Request())
 	if err != nil {
 		return "", http.StatusInternalServerError, fmt.Errorf("failed to get session: %v", err)
@@ -298,12 +278,8 @@ func getUserIDFromSession(c echo.Context) (string, int, error) {
 	jiaUserID := _jiaUserID.(string)
 	var count int
 
-	query := "SELECT COUNT(*) FROM `user` WHERE `jia_user_id` = ?"
-	s := createDataStoreSegment(query, jiaUserID)
-	s.StartTime = txn.StartSegmentNow()
-	err = db.Get(&count, query,
+	err = db.Get(&count, "SELECT COUNT(*) FROM `user` WHERE `jia_user_id` = ?",
 		jiaUserID)
-	s.End()
 	if err != nil {
 		return "", http.StatusInternalServerError, fmt.Errorf("db error: %v", err)
 	}
@@ -315,16 +291,9 @@ func getUserIDFromSession(c echo.Context) (string, int, error) {
 	return jiaUserID, 0, nil
 }
 
-func getJIAServiceURL(txn *newrelic.Transaction, tx *sqlx.Tx) string {
-	spn := txn.StartSegment("getJIAServiceURL")
-	defer spn.End()
-
+func getJIAServiceURL(tx *sqlx.Tx) string {
 	var config Config
-	query := "SELECT * FROM `isu_association_config` WHERE `name` = ?"
-	s := createDataStoreSegment(query, "jia_service_url")
-	s.StartTime = spn.StartTime
-	err := tx.Get(&config, query, "jia_service_url")
-	s.End()
+	err := tx.Get(&config, "SELECT * FROM `isu_association_config` WHERE `name` = ?", "jia_service_url")
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			log.Print(err)
@@ -370,8 +339,6 @@ func postInitialize(c echo.Context) error {
 // POST /api/auth
 // サインアップ・サインイン
 func postAuthentication(c echo.Context) error {
-	txn := nrecho.FromContext(c)
-	defer txn.End()
 	reqJwt := strings.TrimPrefix(c.Request().Header.Get("Authorization"), "Bearer ")
 
 	token, err := jwt.Parse(reqJwt, func(token *jwt.Token) (interface{}, error) {
@@ -404,11 +371,7 @@ func postAuthentication(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "invalid JWT payload")
 	}
 
-	q := "INSERT IGNORE INTO user (`jia_user_id`) VALUES (?)"
-	s := createDataStoreSegment(q, jiaUserID)
-	s.StartTime = txn.StartSegmentNow()
-	_, err = db.Exec(q, jiaUserID)
-	s.End()
+	_, err = db.Exec("INSERT IGNORE INTO user (`jia_user_id`) VALUES (?)", jiaUserID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -433,8 +396,6 @@ func postAuthentication(c echo.Context) error {
 // POST /api/signout
 // サインアウト
 func postSignout(c echo.Context) error {
-	txn := nrecho.FromContext(c)
-	defer txn.End()
 	_, errStatusCode, err := getUserIDFromSession(c)
 	if err != nil {
 		if errStatusCode == http.StatusUnauthorized {
@@ -464,8 +425,6 @@ func postSignout(c echo.Context) error {
 // GET /api/user/me
 // サインインしている自分自身の情報を取得
 func getMe(c echo.Context) error {
-	txn := nrecho.FromContext(c)
-	defer txn.End()
 	jiaUserID, errStatusCode, err := getUserIDFromSession(c)
 	if err != nil {
 		if errStatusCode == http.StatusUnauthorized {
@@ -483,8 +442,6 @@ func getMe(c echo.Context) error {
 // GET /api/isu
 // ISUの一覧を取得
 func getIsuList(c echo.Context) error {
-	txn := nrecho.FromContext(c)
-	defer txn.End()
 	jiaUserID, errStatusCode, err := getUserIDFromSession(c)
 	if err != nil {
 		if errStatusCode == http.StatusUnauthorized {
@@ -502,31 +459,22 @@ func getIsuList(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	query := "SELECT * FROM `isu` WHERE `jia_user_id` = ? ORDER BY `id` DESC"
-	s := createDataStoreSegment(query, jiaUserID)
-	s.StartTime = txn.StartSegmentNow()
 	isuList := []Isu{}
 	err = tx.Select(
 		&isuList,
-		query,
+		"SELECT * FROM `isu` WHERE `jia_user_id` = ? ORDER BY `id` DESC",
 		jiaUserID)
-	s.End()
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	// FIXME: N+1ぽい
-	query2 := "SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ? ORDER BY `timestamp` DESC LIMIT 1"
 	responseList := []GetIsuListResponse{}
 	for _, isu := range isuList {
 		var lastCondition IsuCondition
 		foundLastCondition := true
-		s := createDataStoreSegment(query2, isu.JIAIsuUUID)
-		s.StartTime = txn.StartSegmentNow()
-		err = tx.Get(&lastCondition, query,
+		err = tx.Get(&lastCondition, "SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ? ORDER BY `timestamp` DESC LIMIT 1",
 			isu.JIAIsuUUID)
-		s.End()
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				foundLastCondition = false
@@ -576,8 +524,6 @@ func getIsuList(c echo.Context) error {
 // POST /api/isu
 // ISUを登録
 func postIsu(c echo.Context) error {
-	txn := nrecho.FromContext(c)
-	defer txn.End()
 	jiaUserID, errStatusCode, err := getUserIDFromSession(c)
 	if err != nil {
 		if errStatusCode == http.StatusUnauthorized {
@@ -630,12 +576,9 @@ func postIsu(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	query := "INSERT INTO `isu` (`jia_isu_uuid`, `name`, `image`, `jia_user_id`) VALUES (?, ?, ?, ?)"
-	s := createDataStoreSegment(query, jiaIsuUUID, isuName, image, jiaUserID)
-	s.StartTime = txn.StartSegmentNow()
-	_, err = tx.Exec(query,
+	_, err = tx.Exec("INSERT INTO `isu`"+
+		"	(`jia_isu_uuid`, `name`, `image`, `jia_user_id`) VALUES (?, ?, ?, ?)",
 		jiaIsuUUID, isuName, image, jiaUserID)
-	s.End()
 	if err != nil {
 		mysqlErr, ok := err.(*mysql.MySQLError)
 
@@ -647,7 +590,7 @@ func postIsu(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	targetURL := getJIAServiceURL(txn, tx) + "/api/activate"
+	targetURL := getJIAServiceURL(tx) + "/api/activate"
 	body := JIAServiceRequest{postIsuConditionTargetBaseURL, jiaIsuUUID}
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {
@@ -687,25 +630,17 @@ func postIsu(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	query2 := "UPDATE `isu` SET `character` = ? WHERE  `jia_isu_uuid` = ?"
-	s2 := createDataStoreSegment(query2, isuFromJIA.Character, jiaIsuUUID)
-	s2.StartTime = txn.StartSegmentNow()
-	_, err = tx.Exec(query2, isuFromJIA.Character, jiaIsuUUID)
-	s2.End()
+	_, err = tx.Exec("UPDATE `isu` SET `character` = ? WHERE  `jia_isu_uuid` = ?", isuFromJIA.Character, jiaIsuUUID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	var isu Isu
-	query3 := "SELECT * FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?"
-	s3 := createDataStoreSegment(query3, isuFromJIA.Character, jiaIsuUUID)
-	s3.StartTime = txn.StartSegmentNow()
 	err = tx.Get(
 		&isu,
-		query3,
+		"SELECT * FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
 		jiaUserID, jiaIsuUUID)
-	s3.End()
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -723,8 +658,6 @@ func postIsu(c echo.Context) error {
 // GET /api/isu/:jia_isu_uuid
 // ISUの情報を取得
 func getIsuID(c echo.Context) error {
-	txn := nrecho.FromContext(c)
-	defer txn.End()
 	jiaUserID, errStatusCode, err := getUserIDFromSession(c)
 	if err != nil {
 		if errStatusCode == http.StatusUnauthorized {
@@ -738,12 +671,8 @@ func getIsuID(c echo.Context) error {
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 
 	var res Isu
-	query := "SELECT * FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?"
-	s := createDataStoreSegment(query, jiaUserID, jiaIsuUUID)
-	s.StartTime = txn.StartSegmentNow()
-	err = db.Get(&res, query,
+	err = db.Get(&res, "SELECT * FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
 		jiaUserID, jiaIsuUUID)
-	s.End()
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return c.String(http.StatusNotFound, "not found: isu")
@@ -759,8 +688,6 @@ func getIsuID(c echo.Context) error {
 // GET /api/isu/:jia_isu_uuid/icon
 // ISUのアイコンを取得
 func getIsuIcon(c echo.Context) error {
-	txn := nrecho.FromContext(c)
-	defer txn.End()
 	jiaUserID, errStatusCode, err := getUserIDFromSession(c)
 	if err != nil {
 		if errStatusCode == http.StatusUnauthorized {
@@ -774,9 +701,6 @@ func getIsuIcon(c echo.Context) error {
 	jiaIsuUUID := c.Param("jia_isu_uuid")
 
 	var image []byte
-	query := "SELECT * FROM `isu` WHERE `jia_user_id` = ? ORDER BY `id` DESC"
-	s := createDataStoreSegment(query, jiaUserID)
-	s.StartTime = txn.StartSegmentNow()
 	err = db.Get(&image, "SELECT `image` FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
 		jiaUserID, jiaIsuUUID)
 	if err != nil {
@@ -794,8 +718,6 @@ func getIsuIcon(c echo.Context) error {
 // GET /api/isu/:jia_isu_uuid/graph
 // ISUのコンディショングラフ描画のための情報を取得
 func getIsuGraph(c echo.Context) error {
-	txn := nrecho.FromContext(c)
-	defer txn.End()
 	jiaUserID, errStatusCode, err := getUserIDFromSession(c)
 	if err != nil {
 		if errStatusCode == http.StatusUnauthorized {
@@ -824,13 +746,9 @@ func getIsuGraph(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	query := "SELECT COUNT(*) FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?"
-	s := createDataStoreSegment(query, jiaUserID, jiaIsuUUID)
-	s.StartTime = txn.StartSegmentNow()
 	var count int
-	err = tx.Get(&count, query,
+	err = tx.Get(&count, "SELECT COUNT(*) FROM `isu` WHERE `jia_user_id` = ? AND `jia_isu_uuid` = ?",
 		jiaUserID, jiaIsuUUID)
-	s.End()
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -839,7 +757,7 @@ func getIsuGraph(c echo.Context) error {
 		return c.String(http.StatusNotFound, "not found: isu")
 	}
 
-	res, err := generateIsuGraphResponse(txn, tx, jiaIsuUUID, date)
+	res, err := generateIsuGraphResponse(tx, jiaIsuUUID, date)
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -855,18 +773,14 @@ func getIsuGraph(c echo.Context) error {
 }
 
 // グラフのデータ点を一日分生成
-func generateIsuGraphResponse(txn *newrelic.Transaction, tx *sqlx.Tx, jiaIsuUUID string, graphDate time.Time) ([]GraphResponse, error) {
+func generateIsuGraphResponse(tx *sqlx.Tx, jiaIsuUUID string, graphDate time.Time) ([]GraphResponse, error) {
 	dataPoints := []GraphDataPointWithInfo{}
 	conditionsInThisHour := []IsuCondition{}
 	timestampsInThisHour := []int64{}
 	var startTimeInThisHour time.Time
 	var condition IsuCondition
 
-	query := "SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ? ORDER BY `timestamp` ASC"
-	s := createDataStoreSegment(query, jiaIsuUUID)
-	s.StartTime = txn.StartSegmentNow()
-	rows, err := tx.Queryx(query, jiaIsuUUID)
-	s.End()
+	rows, err := tx.Queryx("SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ? ORDER BY `timestamp` ASC", jiaIsuUUID)
 	if err != nil {
 		return nil, fmt.Errorf("db error: %v", err)
 	}
@@ -880,7 +794,7 @@ func generateIsuGraphResponse(txn *newrelic.Transaction, tx *sqlx.Tx, jiaIsuUUID
 		truncatedConditionTime := condition.Timestamp.Truncate(time.Hour)
 		if truncatedConditionTime != startTimeInThisHour {
 			if len(conditionsInThisHour) > 0 {
-				data, err := calculateGraphDataPoint(txn, conditionsInThisHour)
+				data, err := calculateGraphDataPoint(conditionsInThisHour)
 				if err != nil {
 					return nil, err
 				}
@@ -902,7 +816,7 @@ func generateIsuGraphResponse(txn *newrelic.Transaction, tx *sqlx.Tx, jiaIsuUUID
 	}
 
 	if len(conditionsInThisHour) > 0 {
-		data, err := calculateGraphDataPoint(txn, conditionsInThisHour)
+		data, err := calculateGraphDataPoint(conditionsInThisHour)
 		if err != nil {
 			return nil, err
 		}
@@ -965,9 +879,7 @@ func generateIsuGraphResponse(txn *newrelic.Transaction, tx *sqlx.Tx, jiaIsuUUID
 }
 
 // 複数のISUのコンディションからグラフの一つのデータ点を計算
-func calculateGraphDataPoint(txn *newrelic.Transaction, isuConditions []IsuCondition) (GraphDataPoint, error) {
-	defer txn.StartSegment("calculateGraphDataPoint").End()
-
+func calculateGraphDataPoint(isuConditions []IsuCondition) (GraphDataPoint, error) {
 	conditionsCount := map[string]int{"is_broken": 0, "is_dirty": 0, "is_overweight": 0}
 	rawScore := 0
 	for _, condition := range isuConditions {
@@ -1027,8 +939,6 @@ func calculateGraphDataPoint(txn *newrelic.Transaction, isuConditions []IsuCondi
 // GET /api/condition/:jia_isu_uuid
 // ISUのコンディションを取得
 func getIsuConditions(c echo.Context) error {
-	txn := nrecho.FromContext(c)
-	defer txn.End()
 	jiaUserID, errStatusCode, err := getUserIDFromSession(c)
 	if err != nil {
 		if errStatusCode == http.StatusUnauthorized {
@@ -1069,15 +979,10 @@ func getIsuConditions(c echo.Context) error {
 	}
 
 	var isuName string
-
-	query := "SELECT name FROM `isu` WHERE `jia_isu_uuid` = ? AND `jia_user_id` = ?"
-	s := createDataStoreSegment(query, jiaIsuUUID, jiaUserID)
-	s.StartTime = txn.StartSegmentNow()
 	err = db.Get(&isuName,
-		query,
+		"SELECT name FROM `isu` WHERE `jia_isu_uuid` = ? AND `jia_user_id` = ?",
 		jiaIsuUUID, jiaUserID,
 	)
-	s.End()
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return c.String(http.StatusNotFound, "not found: isu")
@@ -1087,7 +992,7 @@ func getIsuConditions(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	conditionsResponse, err := getIsuConditionsFromDB(txn, db, jiaIsuUUID, endTime, conditionLevel, startTime, conditionLimit, isuName)
+	conditionsResponse, err := getIsuConditionsFromDB(db, jiaIsuUUID, endTime, conditionLevel, startTime, conditionLimit, isuName)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1096,35 +1001,27 @@ func getIsuConditions(c echo.Context) error {
 }
 
 // ISUのコンディションをDBから取得
-func getIsuConditionsFromDB(txn *newrelic.Transaction, db *sqlx.DB, jiaIsuUUID string, endTime time.Time, conditionLevel map[string]interface{}, startTime time.Time,
+func getIsuConditionsFromDB(db *sqlx.DB, jiaIsuUUID string, endTime time.Time, conditionLevel map[string]interface{}, startTime time.Time,
 	limit int, isuName string) ([]*GetIsuConditionResponse, error) {
-	defer txn.StartSegment("getIsuConditionsFromDB").End()
+
 	conditions := []IsuCondition{}
 	var err error
 
 	if startTime.IsZero() {
-		query := "SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ?" +
-			"	AND `timestamp` < ?" +
-			"	ORDER BY `timestamp` DESC"
-		s := createDataStoreSegment(query, jiaIsuUUID, endTime)
-		s.StartTime = txn.StartSegmentNow()
 		err = db.Select(&conditions,
-			query,
+			"SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ?"+
+				"	AND `timestamp` < ?"+
+				"	ORDER BY `timestamp` DESC",
 			jiaIsuUUID, endTime,
 		)
-		s.End()
 	} else {
-		query := "SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ?" +
-			"	AND `timestamp` < ?" +
-			"	AND ? <= `timestamp`" +
-			"	ORDER BY `timestamp` DESC"
-		s := createDataStoreSegment(query, jiaIsuUUID, endTime, startTime)
-		s.StartTime = txn.StartSegmentNow()
 		err = db.Select(&conditions,
-			query,
+			"SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ?"+
+				"	AND `timestamp` < ?"+
+				"	AND ? <= `timestamp`"+
+				"	ORDER BY `timestamp` DESC",
 			jiaIsuUUID, endTime, startTime,
 		)
-		s.End()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("db error: %v", err)
@@ -1180,14 +1077,8 @@ func calculateConditionLevel(condition string) (string, error) {
 // GET /api/trend
 // ISUの性格毎の最新のコンディション情報
 func getTrend(c echo.Context) error {
-	txn := nrecho.FromContext(c)
-	defer txn.End()
 	characterList := []Isu{}
-	query := "SELECT `character` FROM `isu` GROUP BY `character`"
-	s := createDataStoreSegment(query)
-	s.StartTime = txn.StartSegmentNow()
-	err := db.Select(&characterList, query)
-	s.End()
+	err := db.Select(&characterList, "SELECT `character` FROM `isu` GROUP BY `character`")
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1197,11 +1088,8 @@ func getTrend(c echo.Context) error {
 
 	for _, character := range characterList {
 		isuList := []Isu{}
-		query2 := "SELECT * FROM `isu` WHERE `character` = ?"
-		s := createDataStoreSegment(query2, character.Character)
-		s.StartTime = txn.StartSegmentNow()
 		err = db.Select(&isuList,
-			query2,
+			"SELECT * FROM `isu` WHERE `character` = ?",
 			character.Character,
 		)
 		if err != nil {
@@ -1214,14 +1102,10 @@ func getTrend(c echo.Context) error {
 		characterCriticalIsuConditions := []*TrendCondition{}
 		for _, isu := range isuList {
 			conditions := []IsuCondition{}
-			query3 := "SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ? ORDER BY timestamp DESC"
-			s := createDataStoreSegment(query3, isu.JIAIsuUUID)
-			s.StartTime = txn.StartSegmentNow()
 			err = db.Select(&conditions,
 				"SELECT * FROM `isu_condition` WHERE `jia_isu_uuid` = ? ORDER BY timestamp DESC",
 				isu.JIAIsuUUID,
 			)
-			s.End()
 			if err != nil {
 				c.Logger().Errorf("db error: %v", err)
 				return c.NoContent(http.StatusInternalServerError)
@@ -1274,8 +1158,6 @@ func getTrend(c echo.Context) error {
 // POST /api/condition/:jia_isu_uuid
 // ISUからのコンディションを受け取る
 func postIsuCondition(c echo.Context) error {
-	txn := nrecho.FromContext(c)
-	defer txn.End()
 	// TODO: 一定割合リクエストを落としてしのぐようにしたが、本来は全量さばけるようにすべき
 	dropProbability := 0.9
 	if rand.Float64() <= dropProbability {
@@ -1303,12 +1185,8 @@ func postIsuCondition(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	query := "SELECT COUNT(*) FROM `isu` WHERE `jia_isu_uuid` = ?"
-	s := createDataStoreSegment(query, jiaIsuUUID)
-	s.StartTime = txn.StartSegmentNow()
 	var count int
-	err = tx.Get(&count, query, jiaIsuUUID)
-	s.End()
+	err = tx.Get(&count, "SELECT COUNT(*) FROM `isu` WHERE `jia_isu_uuid` = ?", jiaIsuUUID)
 	if err != nil {
 		c.Logger().Errorf("db error: %v", err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1324,17 +1202,11 @@ func postIsuCondition(c echo.Context) error {
 			return c.String(http.StatusBadRequest, "bad request body")
 		}
 
-		query2 := "INSERT INTO `isu_condition`" +
-			"	(`jia_isu_uuid`, `timestamp`, `is_sitting`, `condition`, `message`)" +
-			"	VALUES (?, ?, ?, ?, ?)"
-		s := createDataStoreSegment(query2, jiaIsuUUID, timestamp, cond.IsSitting, cond.Condition, cond.Message)
-		s.StartTime = txn.StartSegmentNow()
 		_, err = tx.Exec(
 			"INSERT INTO `isu_condition`"+
 				"	(`jia_isu_uuid`, `timestamp`, `is_sitting`, `condition`, `message`)"+
 				"	VALUES (?, ?, ?, ?, ?)",
 			jiaIsuUUID, timestamp, cond.IsSitting, cond.Condition, cond.Message)
-		s.End()
 		if err != nil {
 			c.Logger().Errorf("db error: %v", err)
 			return c.NoContent(http.StatusInternalServerError)
